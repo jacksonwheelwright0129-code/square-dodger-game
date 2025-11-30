@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Square Dodger</title>
+    <!-- Load Tailwind CSS for utility styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Tone.js for web audio generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <style>
+        /* Custom CSS for the Game */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0d1117;
+            color: #c9d1d9;
+            user-select: none; /* Prevent selection of game elements */
+        }
+
+        /* Center the canvas and make it dark */
+        #gameCanvas {
+            background-color: #161b22;
+            border: 4px solid #30363d;
+            box-shadow: 0 0 20px rgba(49, 106, 178, 0.5);
+            border-radius: 12px;
+            display: block;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            font-weight: 600;
+            border-radius: 8px;
+            transition: all 200ms ease-in-out;
+            transform: scale(1);
+            border: none;
+            cursor: pointer;
+        }
+
+        .btn:hover {
+            transform: scale(1.03);
+        }
+
+        .btn-primary {
+            background-color: #2563eb;
+            color: white;
+            box-shadow: 0 4px 6px rgba(59, 130, 246, 0.5);
+        }
+
+        .btn-primary:hover {
+            background-color: #1d4ed8;
+        }
+
+        .btn-success {
+            background-color: #16a34a;
+            color: white;
+            box-shadow: 0 4px 6px rgba(34, 197, 94, 0.5);
+        }
+
+        .btn-success:hover {
+            background-color: #15803d;
+        }
+
+        .game-status-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.75);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            border-radius: 12px;
+            text-align: center;
+        }
+
+        /* Ensure the main container limits the size on large screens */
+        .game-container-wrapper {
+            width: 100%;
+            max-width: 500px;
+            /* Max width for a good vertical gameplay feel */
+            max-height: 90vh;
+        }
+
+        /* Responsive height for canvas container */
+        .canvas-container {
+            position: relative;
+            width: 100%;
+            padding-top: 150%; /* 2:3 aspect ratio (e.g., 500x750) */
+        }
+
+        #gameCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Style for the active power-up indicator */
+        #powerUpIndicator {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 0.8rem;
+            z-index: 10; /* Above the canvas */
+            opacity: 0.9;
+            pointer-events: none; /* Ignore mouse events */
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <!-- Game Container -->
+    <div class="game-container-wrapper flex flex-col items-center">
+        <h1 class="text-3xl font-bold mb-4 text-blue-400">Square Dodger</h1>
+        
+        <div id="canvasContainer" class="canvas-container w-full relative">
+            <canvas id="gameCanvas"></canvas>
+            
+            <!-- Power-Up Indicator (hidden by default) -->
+            <div id="powerUpIndicator" class="hidden text-white bg-opacity-70"></div>
+
+            <!-- Start Screen -->
+            <div id="startScreen" class="game-status-overlay">
+                <h2 class="text-4xl font-extrabold mb-4 text-white">DODGE!</h2>
+                <p class="mb-6 text-lg text-gray-300">Use ⬅️ and ➡️ keys or touch/click the screen to move.</p>
+                <p class="text-sm text-gray-400 mb-8">(Note: Audio requires initial click to start)</p>
+                <button id="startButton" class="btn btn-primary">Start Game</button>
+            </div>
+            
+            <!-- Game Over Screen -->
+            <div id="gameOverScreen" class="game-status-overlay hidden">
+                <h2 class="text-5xl font-extrabold mb-2 text-red-500">Game Over!</h2>
+                <p class="text-3xl font-bold mb-6 text-white">Final Score: <span id="finalScore">0</span></p>
+                <button id="restartButton" class="btn btn-primary">Play Again</button>
+            </div>
+            
+            <!-- Level Complete Screen -->
+            <div id="levelCompleteScreen" class="game-status-overlay hidden">
+                <h2 class="text-5xl font-extrabold mb-2 text-green-400">Level <span id="completedLevel">1</span> Complete!</h2>
+                <p class="text-3xl font-bold mb-6 text-white">Score: <span id="levelScore">100</span></p>
+                <button id="nextLevelButton" class="btn btn-success">Proceed to Level <span id="nextLevelNumber">2</span></button>
+            </div>
+        </div>
+        
+        <!-- Score Display moved to the bottom -->
+        <div id="scoreDisplay" class="text-xl mt-4 p-2 bg-gray-800 rounded-lg shadow-inner">
+            Level: 1 | Score: 0
+        </div>
+
+        <div id="controlInfo" class="mt-2 text-center text-gray-400 text-sm">
+            <p>Control: Left/Right Arrow Keys or tap screen left/right.</p>
+        </div>
+    </div>
+
+    <!-- Firebase boilerplate for environment setup (required for all web apps) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global variables provided by the environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db, auth, userId = null;
+
+        if (firebaseConfig) {
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+            
+            // Set up authentication listener
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    userId = user.uid;
+                    console.log("Firebase Auth Ready. User ID:", userId);
+                    // Firestore operations can begin here if needed for saving scores, etc.
+                } else {
+                    console.log("No user signed in.");
+                    // Fallback to anonymous sign-in if the custom token isn't provided or fails
+                    if (!initialAuthToken) {
+                         signInAnonymously(auth).then(cred => {
+                            userId = cred.user.uid;
+                            console.log("Signed in anonymously. User ID:", userId);
+                        }).catch(e => console.error("Anonymous sign-in failed:", e));
+                    }
+                }
+            });
+
+            // Sign in with custom token if available
+            if (initialAuthToken) {
+                signInWithCustomToken(auth, initialAuthToken).catch(e => console.error("Custom token sign-in failed:", e));
+            } else {
+                // If no custom token, trigger anonymous sign-in via the onAuthStateChanged listener above
+            }
+        } else {
+            console.warn("Firebase configuration not found. Persistence disabled.");
+        }
+    </script>
+
+    <script>
+        // --- Gemini API Utilities (Placeholder) ---
+        function base64ToArrayBuffer(base64) {
+            const binaryString = atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        function pcmToWav(pcmData, sampleRate) {
+            const numChannels = 1;
+            const bytesPerSample = 2; 
+            const dataLength = pcmData.length * bytesPerSample;
+            const buffer = new ArrayBuffer(44 + dataLength);
+            const view = new DataView(buffer);
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, 36 + dataLength, true);
+            writeString(view, 8, 'WAVE');
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true); 
+            view.setUint16(22, numChannels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * numChannels * bytesPerSample, true);
+            view.setUint16(32, numChannels * bytesPerSample, true);
+            view.setUint16(34, bytesPerSample * 8, true); 
+            writeString(view, 36, 'data');
+            view.setUint32(40, dataLength, true);
+            let offset = 44;
+            for (let i = 0; i < pcmData.length; i++, offset += 2) {
+                view.setInt16(offset, pcmData[i], true);
+            }
+            return new Blob([buffer], { type: 'audio/wav' });
+        }
+
+        function writeString(view, offset, string) {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i));
+            }
+        }
+        // --- End Gemini API Utilities ---
+
+        // Main game logic starts here
+        window.onload = function() {
+            const canvas = document.getElementById('gameCanvas');
+            const ctx = canvas.getContext('2d');
+            const startScreen = document.getElementById('startScreen');
+            const startButton = document.getElementById('startButton');
+            const gameOverScreen = document.getElementById('gameOverScreen');
+            const restartButton = document.getElementById('restartButton');
+            const levelCompleteScreen = document.getElementById('levelCompleteScreen'); 
+            const nextLevelButton = document.getElementById('nextLevelButton');         
+            const scoreDisplay = document.getElementById('scoreDisplay');
+            const finalScoreElement = document.getElementById('finalScore');
+            const canvasContainer = document.getElementById('canvasContainer');
+            const powerUpIndicator = document.getElementById('powerUpIndicator');
+            
+            let game;
+            let animationFrameId;
+            
+            // --- Tone.js Setup for Sound Effects ---
+            let deathSynth;
+            let scoreSynth; 
+            let powerUpSynth; 
+
+            if (typeof Tone !== 'undefined') {
+                deathSynth = new Tone.NoiseSynth({
+                    noise: { type: "pink" },
+                    envelope: { attack: 0.01, decay: 0.2, sustain: 0, release: 0.05 },
+                    filterEnvelope: { attack: 0.005, decay: 0.1, sustain: 0, release: 0.05, baseFrequency: 1000, octaves: 3 }
+                }).toDestination();
+
+                scoreSynth = new Tone.Synth({
+                    oscillator: { type: "sine" },
+                    envelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.1 }
+                }).toDestination();
+                
+                // Synth for a satisfying, higher-pitched sound for power-up collection
+                powerUpSynth = new Tone.Synth({
+                    oscillator: { type: "triangle" },
+                    envelope: { attack: 0.005, decay: 0.15, sustain: 0, release: 0.1 },
+                    filter: { type: "lowpass", frequency: 1500 }
+                }).toDestination();
+            }
+
+            function playDeathSound() {
+                if (deathSynth) { Tone.start(); deathSynth.triggerAttackRelease("0.2"); }
+            }
+            
+            function playScoreSound() {
+                if (scoreSynth) { Tone.start(); scoreSynth.triggerAttackRelease("C5", "16n", Tone.now()); }
+            }
+
+            // Play notes sequentially instead of passing an array to triggerAttackRelease
+            function playPowerUpSound() {
+                if (powerUpSynth) { 
+                    Tone.start(); 
+                    const now = Tone.now();
+                    const duration = "32n"; // Very short duration
+                    const delay = 0.05; // 50ms delay between notes
+                    
+                    // Note 1: C6
+                    powerUpSynth.triggerAttackRelease("C6", duration, now);
+                    // Note 2: G6, played slightly after the first note starts
+                    powerUpSynth.triggerAttackRelease("G6", duration, now + delay); 
+                }
+            }
+            // ------------------------------------
+
+            // --- Game Configuration ---
+            const config = {
+                playerSize: 30, // Base size for the player block
+                playerBaseSpeed: 7, 
+                enemyRadius: 15,
+                enemyMinSpeed: 2,
+                enemyMaxSpeed: 5,
+                spawnRate: 60, 
+                scoreGoal: 1000, 
+                
+                // Difficulty Constants
+                // Removed: difficultySpeedIncrement: 1,      
+                // Removed: playerTierSpeedIncrement: 0.5,    
+                difficultySpawnDecrease: 3,       
+                // The fixed extreme speed bonus logic is replaced by the score-based multiplier below
+                maxEnemySpeedCap: 15, // Hard cap to prevent enemies from being impossibly fast
+                levelMaxEnemySpeedMultiplier: 1.2, 
+                levelPlayerSpeedMultiplier: 1.1,   
+                
+                // Score multiplier parameters (20% enemy speed increase every 100 points)
+                scoreSpeedIncreasePoints: 100, 
+                scoreSpeedIncreasePercentage: 0.2, 
+
+                // CHANGED: Player Speed Increase Parameters (1 unit increase every 100 dodged enemies)
+                playerSpeedIncreaseDodges: 100, 
+                playerSpeedIncreaseUnit: 1, 
+                
+                // Power-Up Configuration
+                powerUpSize: 20,
+                powerUpSpeed: 4, 
+                powerUpSpawnChance: 0.005, 
+                powerUpDuration: 5000, // 5 seconds in milliseconds
+
+                enemyColors: ['#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#f97316'],
+            };
+
+            // --- PowerUp Class ---
+            class PowerUp {
+                constructor(x, y, type) {
+                    this.x = x;
+                    this.y = y;
+                    this.size = config.powerUpSize;
+                    this.speed = config.powerUpSpeed;
+                    this.type = type; // 'shield' or 'slowmo'
+                    this.active = true;
+                    this.color = type === 'shield' ? '#fde047' : '#06b6d4'; // Yellow for Shield, Cyan for Slow-Mo
+                    this.symbol = type === 'shield' ? '🛡️' : '⏳';
+                }
+
+                update() {
+                    this.y += this.speed;
+                }
+
+                draw() {
+                    ctx.fillStyle = this.color;
+                    ctx.shadowColor = this.color; 
+                    ctx.shadowBlur = 12;
+
+                    // Draw the square background
+                    ctx.fillRect(this.x, this.y, this.size, this.size);
+
+                    // Draw the symbol (Emoji)
+                    ctx.shadowBlur = 0; // Reset shadow for text
+                    ctx.font = `${this.size - 4}px Arial`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(this.symbol, this.x + this.size / 2, this.y + this.size / 2);
+                    
+                    ctx.shadowColor = 'transparent';
+                }
+            }
+
+            // --- Player Class ---
+            class Player {
+                constructor(x, y, size) {
+                    this.x = x;
+                    this.y = y;
+                    this.size = size;
+                    this.vx = 0;
+                    this.color = '#38bdf8'; 
+                    this.speed = config.playerBaseSpeed;
+                    this.hasShield = false; 
+                    this.shieldDuration = 0; 
+                }
+
+                setSpeed(newSpeed) {
+                    this.speed = newSpeed;
+                }
+                
+                // Method to update player size (now primarily used to reset to base size)
+                setSize(newSize) {
+                    // Update size and adjust position to keep the player centered horizontally
+                    // and its bottom edge fixed vertically (y-position remains constant for the bottom edge).
+                    const deltaSize = newSize - this.size;
+                    this.x -= deltaSize / 2; // Move left by half the size increase
+                    this.size = newSize;
+
+                    // Keep player within horizontal bounds
+                    if (this.x < 0) this.x = 0;
+                    if (this.x > canvas.width - this.size) this.x = canvas.width - this.size;
+                }
+
+                activateShield() {
+                    this.hasShield = true;
+                    this.shieldDuration = config.powerUpDuration;
+                    this.color = '#fde047'; // Temporary shield color
+                }
+                
+                updateShield(deltaTime) {
+                    if (this.hasShield) {
+                        this.shieldDuration -= deltaTime;
+                        if (this.shieldDuration <= 0) {
+                            this.hasShield = false;
+                            this.color = '#38bdf8'; // Restore original color
+                            this.shieldDuration = 0;
+                            game.updateIndicator();
+                        }
+                    }
+                }
+
+                update() {
+                    if (this.vx > 0) {
+                        this.vx = this.speed;
+                    } else if (this.vx < 0) {
+                        this.vx = -this.speed;
+                    }
+                    
+                    this.x += this.vx;
+
+                    if (this.x < 0) {
+                        this.x = 0;
+                    } else if (this.x > canvas.width - this.size) {
+                        this.x = canvas.width - this.size;
+                    }
+                }
+
+                draw() {
+                    ctx.fillStyle = this.color;
+                    ctx.fillRect(this.x, this.y, this.size, this.size);
+                    
+                    if (this.hasShield) {
+                         // Add glowing effect for shield
+                        ctx.strokeStyle = '#fde047';
+                        ctx.lineWidth = 4;
+                        ctx.shadowColor = '#fde047';
+                        ctx.shadowBlur = 15;
+                        ctx.strokeRect(this.x, this.y, this.size, this.size);
+                        ctx.shadowBlur = 0;
+                    } else {
+                        ctx.strokeStyle = '#e0f2fe';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(this.x, this.y, this.size, this.size);
+                    }
+                }
+            }
+
+            // --- Enemy (Circle) Class ---
+            class Enemy {
+                constructor(x, y, radius, speed, color) { 
+                    this.x = x;
+                    this.y = y;
+                    this.radius = radius;
+                    this.baseSpeed = speed; // Store the original calculated speed
+                    this.currentSpeed = speed; // The speed currently used for movement
+                    this.color = color; 
+                }
+
+                update() {
+                    this.y += this.currentSpeed;
+                }
+
+                draw() {
+                    ctx.fillStyle = this.color;
+                    ctx.shadowColor = this.color; 
+                    ctx.shadowBlur = 10;
+
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                    ctx.closePath();
+                    ctx.fill(); 
+                    
+                    ctx.shadowBlur = 0; 
+                    ctx.shadowColor = 'transparent';
+                }
+            }
+
+            // --- Game State/Manager ---
+            class Game {
+                constructor() {
+                    this.score = 0;
+                    this.isGameOver = true;
+                    this.enemies = [];
+                    this.powerUps = []; 
+                    this.frames = 0;
+                    this.difficultyLevel = 0; // Counts total enemies dodged
+                    this.currentSpawnRate = config.spawnRate;
+                    this.currentMaxEnemySpeed = config.enemyMaxSpeed;
+                    this.currentLevel = 1; 
+                    this.baseMaxEnemySpeed = config.enemyMaxSpeed; 
+                    this.basePlayerSpeed = config.playerBaseSpeed; 
+                    this.currentEnemyColor = config.enemyColors[0]; 
+                    this.slowMoDuration = 0; 
+                    this.lastTime = performance.now(); 
+                }
+
+                init(startLevel = 1) {
+                    this.resizeCanvas();
+                    const playerX = (canvas.width / 2) - (config.playerSize / 2);
+                    const playerY = canvas.height - config.playerSize * 2;
+                    
+                    if (!this.player) {
+                        this.player = new Player(playerX, playerY, config.playerSize);
+                    } else {
+                        // Reset player state
+                        this.player.x = playerX;
+                        this.player.y = playerY;
+                        this.player.setSize(config.playerSize); // Reset size back to base
+                        this.player.hasShield = false;
+                        this.player.shieldDuration = 0;
+                        this.player.color = '#38bdf8';
+                    }
+
+                    this.slowMoDuration = 0; 
+                    
+                    this.currentLevel = startLevel;
+                    this.score = 0;
+                    this.enemies = [];
+                    this.powerUps = []; 
+                    this.frames = 0;
+                    this.isGameOver = false;
+                    this.difficultyLevel = 0; 
+
+                    const levelMultiplier = 1 + (this.currentLevel - 1) * 0.2; 
+                    this.baseMaxEnemySpeed = config.enemyMaxSpeed * levelMultiplier;
+                    this.basePlayerSpeed = config.playerBaseSpeed * levelMultiplier; 
+
+                    this.currentSpawnRate = config.spawnRate;
+                    this.currentMaxEnemySpeed = this.baseMaxEnemySpeed;
+
+                    const colorIndex = (this.currentLevel - 1) % config.enemyColors.length;
+                    this.currentEnemyColor = config.enemyColors[colorIndex];
+
+                    this.updateDifficulty(); 
+                    this.updateScoreDisplay(); 
+                    this.updateIndicator();
+
+                    startScreen.classList.add('hidden');
+                    gameOverScreen.classList.add('hidden');
+                    levelCompleteScreen.classList.add('hidden');
+                    this.lastTime = performance.now(); 
+                }
+
+                resizeCanvas() {
+                    canvas.width = canvasContainer.clientWidth;
+                    canvas.height = canvasContainer.clientHeight;
+                }
+
+                updateScoreDisplay() {
+                    scoreDisplay.textContent = `Level: ${this.currentLevel} | Score: ${this.score}`;
+                }
+
+                updateIndicator() {
+                    if (this.player.hasShield) {
+                        const remaining = Math.ceil(this.player.shieldDuration / 1000);
+                        powerUpIndicator.textContent = `🛡️ SHIELD: ${remaining}s`;
+                        powerUpIndicator.className = 'absolute bottom-3 left-1/2 transform -translate-x-1/2 p-2 rounded-lg text-white bg-yellow-600 bg-opacity-80 font-bold text-sm';
+                        powerUpIndicator.classList.remove('hidden');
+                    } else if (this.slowMoDuration > 0) {
+                        const remaining = Math.ceil(this.slowMoDuration / 1000);
+                        powerUpIndicator.textContent = `⏳ SLOW-MO: ${remaining}s`;
+                        powerUpIndicator.className = 'absolute bottom-3 left-1/2 transform -translate-x-1/2 p-2 rounded-lg text-white bg-cyan-600 bg-opacity-80 font-bold text-sm';
+                        powerUpIndicator.classList.remove('hidden');
+                    } else {
+                        powerUpIndicator.classList.add('hidden');
+                    }
+                }
+
+                updateDifficulty() {
+                    // --- 1. Enemy Speed Scaling (Based on Score) ---
+                    const multiplierTier = Math.floor(this.score / config.scoreSpeedIncreasePoints); 
+                    const scoreMultiplier = 1 + (multiplierTier * config.scoreSpeedIncreasePercentage);
+                    let newMaxEnemySpeed = this.baseMaxEnemySpeed;
+                    newMaxEnemySpeed *= scoreMultiplier; 
+                    
+                    // --- 2. Player Speed Scaling (Based on Dodged Enemies/Difficulty Level) ---
+                    // Logic: Increase speed by 1 unit for every 100 enemies dodged.
+                    const speedTier = Math.floor(this.difficultyLevel / config.playerSpeedIncreaseDodges);
+                    const newPlayerSpeed = this.basePlayerSpeed + speedTier * config.playerSpeedIncreaseUnit;
+                    this.player.setSpeed(newPlayerSpeed);
+                    
+                    // --- 3. Player Size Fixed ---
+                    // Ensure the player block remains at its base size (reverting the size increase logic)
+                    this.player.setSize(config.playerSize); 
+
+
+                    // --- 4. Spawn Rate Scaling (Based on Dodged Enemies/Difficulty Level) ---
+                    this.currentSpawnRate = Math.max(10, config.spawnRate - this.difficultyLevel * config.difficultySpawnDecrease);
+                    
+                    // --- 5. Apply Final Cap and Slow-Mo ---
+                    this.currentMaxEnemySpeed = Math.min(newMaxEnemySpeed, config.maxEnemySpeedCap); 
+
+                    const speedFactor = this.slowMoDuration > 0 ? 0.5 : 1;
+                    this.enemies.forEach(enemy => {
+                        enemy.currentSpeed = this.currentMaxEnemySpeed * speedFactor;
+                    });
+                }
+
+                spawnEnemy() {
+                    const x = Math.random() * (canvas.width - config.enemyRadius * 2) + config.enemyRadius;
+                    const y = -config.enemyRadius; 
+                    
+                    // Enemy speed is calculated from currentMaxEnemySpeed, factoring in slow-mo
+                    const speedFactor = this.slowMoDuration > 0 ? 0.5 : 1;
+                    const speed = this.currentMaxEnemySpeed * speedFactor;
+
+                    const newEnemy = new Enemy(x, y, config.enemyRadius, speed, this.currentEnemyColor); 
+                    this.enemies.push(newEnemy);
+                }
+
+                // Spawn Power-Up
+                spawnPowerUp() {
+                    if (Math.random() < config.powerUpSpawnChance) {
+                        const x = Math.random() * (canvas.width - config.powerUpSize);
+                        const y = -config.powerUpSize;
+                        const type = Math.random() < 0.5 ? 'shield' : 'slowmo';
+                        this.powerUps.push(new PowerUp(x, y, type));
+                    }
+                }
+
+                checkCollisions() {
+                    const P = this.player;
+                    const P_rect = { x: P.x, y: P.y, w: P.size, h: P.size };
+
+                    // 1. Check Enemy Collisions
+                    for (const E of this.enemies) {
+                        // AABB check (simplified square collision with enemy circle logic)
+                        let closestX = Math.max(P_rect.x, Math.min(E.x, P_rect.x + P_rect.w));
+                        let closestY = Math.max(P_rect.y, Math.min(E.y, P_rect.y + P_rect.h));
+
+                        const dx = E.x - closestX;
+                        const dy = E.y - closestY;
+                        const distanceSq = (dx * dx) + (dy * dy);
+                        
+                        if (distanceSq < (E.radius * E.radius)) {
+                            if (P.hasShield) {
+                                // If shielded, remove the enemy but survive the collision
+                                this.enemies = this.enemies.filter(e => e !== E);
+                                playScoreSound(); // Use score sound for blocked hit
+                                return; // Continue checking for other enemies
+                            } else {
+                                // Game over only if not shielded
+                                this.isGameOver = true;
+                                playDeathSound(); 
+                                return;
+                            }
+                        }
+                    }
+
+                    // 2. Check Power-Up Collisions (AABB collision between two squares)
+                    const playerCenterX = P.x + P.size / 2;
+                    const playerCenterY = P.y + P.size / 2;
+
+                    this.powerUps.forEach(PU => {
+                        const PU_rect = { x: PU.x, y: PU.y, w: PU.size, h: PU.size };
+                        
+                        // Simple bounding box collision check
+                        if (P_rect.x < PU_rect.x + PU_rect.w &&
+                            P_rect.x + P_rect.w > PU_rect.x &&
+                            P_rect.y < PU_rect.y + PU_rect.h &&
+                            P_rect.y + P_rect.h > PU_rect.y) 
+                        {
+                            this.activatePowerUp(PU.type);
+                            PU.active = false; // Mark for removal
+                        }
+                    });
+
+                    // Remove collected power-ups
+                    this.powerUps = this.powerUps.filter(pu => pu.active);
+                }
+                
+                activatePowerUp(type) {
+                    playPowerUpSound();
+
+                    if (type === 'shield') {
+                        if (this.player.hasShield) {
+                             // Extend duration if already active
+                            this.player.shieldDuration += config.powerUpDuration;
+                        } else {
+                            // Otherwise, activate normally
+                            this.slowMoDuration = 0;
+                            this.player.activateShield();
+                            this.updateDifficulty(); 
+                        }
+                    } else if (type === 'slowmo') {
+                         if (this.slowMoDuration > 0) {
+                            // Extend duration if already active
+                            this.slowMoDuration += config.powerUpDuration;
+                        } else {
+                            // Otherwise, activate normally
+                            this.player.hasShield = false;
+                            this.player.shieldDuration = 0;
+                            this.player.color = '#38bdf8'; 
+                            
+                            this.slowMoDuration = config.powerUpDuration;
+                            this.updateDifficulty(); 
+                        }
+                    }
+                    this.updateIndicator();
+                }
+
+                update() {
+                    if (this.isGameOver) return;
+
+                    // Calculate Delta Time (time elapsed since last frame)
+                    const currentTime = performance.now();
+                    const deltaTime = currentTime - this.lastTime;
+                    this.lastTime = currentTime;
+
+                    this.frames++;
+
+                    if (this.score >= config.scoreGoal) {
+                        this.levelComplete();
+                        return; 
+                    }
+
+                    // Update Power-Up Durations
+                    this.player.updateShield(deltaTime);
+                    if (this.slowMoDuration > 0) {
+                        this.slowMoDuration -= deltaTime;
+                        if (this.slowMoDuration <= 0) {
+                            this.slowMoDuration = 0;
+                            this.updateDifficulty(); // Re-calculate speed to normal
+                        }
+                    }
+                    this.updateIndicator();
+
+
+                    this.player.update();
+                    
+                    // Spawning
+                    if (this.frames % Math.floor(this.currentSpawnRate) === 0) {
+                        this.spawnEnemy();
+                    }
+                    this.spawnPowerUp(); // Power-ups are spawned every frame based on chance
+
+                    // Update and filter enemies and power-ups
+                    this.enemies.forEach(enemy => enemy.update());
+                    this.powerUps.forEach(pu => pu.update());
+
+                    const initialEnemyCount = this.enemies.length;
+                    this.enemies = this.enemies.filter(enemy => enemy.y < canvas.height + enemy.radius);
+                    this.powerUps = this.powerUps.filter(pu => pu.y < canvas.height + pu.size);
+                    
+                    // Points gained are equal to the number of enemies that left the screen
+                    const pointsGained = initialEnemyCount - this.enemies.length;
+                    this.score += pointsGained;
+                    
+                    if (pointsGained > 0) {
+                        this.difficultyLevel += pointsGained; 
+                        playScoreSound(); 
+                    }
+
+                    this.updateScoreDisplay(); 
+                    this.updateDifficulty(); 
+                    this.checkCollisions();
+
+                    if (this.isGameOver) {
+                        cancelAnimationFrame(animationFrameId);
+                        this.endGame();
+                    }
+                }
+
+                draw() {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                    // Draw player first, so enemies appear to fall on top
+                    this.player.draw();
+
+                    // Draw enemies
+                    this.enemies.forEach(enemy => enemy.draw());
+
+                    // Draw power-ups
+                    this.powerUps.forEach(pu => pu.draw());
+                }
+                
+                levelComplete() {
+                    this.isGameOver = true; 
+                    cancelAnimationFrame(animationFrameId);
+
+                    document.getElementById('completedLevel').textContent = this.currentLevel;
+                    document.getElementById('levelScore').textContent = this.score;
+                    document.getElementById('nextLevelNumber').textContent = this.currentLevel + 1;
+                    this.updateIndicator(); // Hide indicator
+
+                    gameOverScreen.classList.add('hidden');
+                    startScreen.classList.add('hidden');
+                    levelCompleteScreen.classList.remove('hidden');
+                    
+                    console.log(`Level ${this.currentLevel} Complete!`);
+                }
+
+                endGame() {
+                    finalScoreElement.textContent = this.score;
+                    this.updateScoreDisplay(); 
+                    this.updateIndicator(); // Hide indicator
+
+                    levelCompleteScreen.classList.add('hidden'); 
+                    startScreen.classList.add('hidden');
+                    gameOverScreen.classList.remove('hidden');
+                    
+                    console.log('Game Over. Final Score:', this.score);
+                }
+            }
+
+            // --- Game Loop and Event Handling ---
+            function gameLoop() {
+                game.update();
+                game.draw();
+                if (!game.isGameOver) {
+                    animationFrameId = requestAnimationFrame(gameLoop);
+                }
+            }
+
+            function startGame() {
+                game = new Game();
+                game.init(1); 
+                gameLoop();
+            }
+            
+            function startNextLevel() {
+                const nextLevel = game.currentLevel + 1;
+                game.init(nextLevel);
+                gameLoop();
+            }
+
+            // --- Input Handlers (Unchanged) ---
+            let keys = {};
+
+            document.addEventListener('keydown', (e) => {
+                keys[e.key] = true;
+                handleMovement();
+            });
+
+            document.addEventListener('keyup', (e) => {
+                keys[e.key] = false;
+                handleMovement(); 
+            });
+            
+            function handleMovement() {
+                if (!game || game.isGameOver) return;
+                
+                const currentSpeed = game.player.speed;
+
+                if (keys['ArrowLeft'] || keys['a'] || keys['A']) {
+                    game.player.vx = -currentSpeed;
+                } else if (keys['ArrowRight'] || keys['d'] || keys['D']) {
+                    game.player.vx = currentSpeed;
+                } else {
+                    game.player.vx = 0;
+                }
+            }
+
+            canvas.addEventListener('mousedown', handleTouchOrClick);
+            canvas.addEventListener('touchstart', handleTouchOrClick);
+            canvas.addEventListener('touchend', handleTouchOrClickEnd);
+
+            function handleTouchOrClick(e) {
+                e.preventDefault();
+                if (!game || game.isGameOver) return;
+                
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const rect = canvas.getBoundingClientRect();
+                const xPos = clientX - rect.left;
+                
+                const currentSpeed = game.player.speed;
+
+                if (xPos < canvas.width / 2) {
+                    game.player.vx = -currentSpeed;
+                } else {
+                    game.player.vx = currentSpeed;
+                }
+            }
+            
+            function handleTouchOrClickEnd(e) {
+                 e.preventDefault();
+                 if (!game || game.isGameOver) return;
+                 game.player.vx = 0;
+            }
+
+
+            // --- UI Bindings (Unchanged) ---
+            startButton.addEventListener('click', startGame);
+            restartButton.addEventListener('click', startGame);
+            nextLevelButton.addEventListener('click', startNextLevel); 
+
+            // --- Resize Handler (Unchanged) ---
+            window.addEventListener('resize', () => {
+                if (game) {
+                    game.resizeCanvas();
+                    // Ensure the player is repositioned to account for potential size changes
+                    game.player.x = (canvas.width / 2) - (game.player.size / 2);
+                    game.player.y = canvas.height - game.player.size * 2;
+                } else {
+                    const container = document.getElementById('canvasContainer');
+                    canvas.width = container.clientWidth;
+                    canvas.height = container.clientHeight;
+                }
+            });
+
+            window.dispatchEvent(new Event('resize'));
+        };
+
+    </script>
+</body>
+</html>
